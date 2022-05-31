@@ -22,10 +22,15 @@
 from __future__ import print_function
 import os, sys, re, base64, json, traceback
 dirNm, execName = os.path.split(os.path.realpath(sys.argv[0]))
-sys.path.append(os.path.realpath(os.path.join(dirNm, "../libexec")))
-sys.path.append(os.path.realpath(os.path.join(dirNm, "../site")))
+sys.path.append(os.path.join(os.environ['XALT_DIR'], "libexec"))
+sys.path.append(os.path.join(os.environ['XALT_DIR'], "site"))
+ 
+try:
+  import MySQLdb
+except:
+  import mysql.connector as MySQLdb
 
-import MySQLdb, getpass, time, random, ctypes
+import getpass, time, random, ctypes
 import warnings
 from   ctypes           import *   # used to interact with C shared libraries
 from   xalt_util        import *
@@ -42,17 +47,15 @@ except:
   pass
 
 #libcrc = CDLL(os.path.realpath(os.path.join(dirNm, "../lib64/libcrcFast.so")))
-libpreIngest = CDLL(os.path.realpath(os.path.join(dirNm, "../lib64/libpreIngest.so")))
+libpreIngest = CDLL(os.path.join(os.environ['XALT_DIR'], "lib64", "libpreIngest.so"))
 pre_ingest_filter = libpreIngest.pre_ingest_filter
 pre_ingest_filter.argtypes = [c_char_p]
 pre_ingest_filter.restype  = c_double
 
-libpkgFilter = CDLL(os.path.realpath(os.path.join(dirNm, "../lib64/libpkgFilter.so")))
+libpkgFilter = CDLL(os.path.join(os.environ['XALT_DIR'], "lib64", "libpkgFilter.so"))
 pkgFilter = libpkgFilter.keep_pkg
 pkgFilter.argtypes = [c_char_p]
 pkgFilter.restype  = c_int
-
-
 
 warnings.filterwarnings("ignore", "Unknown table.*")
 
@@ -214,7 +217,7 @@ class XALTdb(object):
 
     try:
       self.__conn = MySQLdb.connect \
-                      (self.__host,self.__user,self.__passwd, use_unicode=True, \
+                      (host=self.__host,user=self.__user,password=self.__passwd, use_unicode=True, \
                        charset="utf8", connect_timeout=120)
       if (databaseName):
         cursor = self.__conn.cursor()
@@ -258,14 +261,12 @@ class XALTdb(object):
       
       if (debug): sys.stdout.write("  --> Trying to connect to database\n")
       conn   = self.connect()
-      cursor = conn.cursor()
+      cursor = conn.cursor(buffered=True)
 
       if (debug): sys.stdout.write("  --> Starting TRANSACTION\n")
       query  = 'USE '+self.db()
-      conn.query(query)
-      query  = 'START TRANSACTION'
-      conn.query(query)
-      query  = ""
+      cursor.execute(query)
+      conn.start_transaction()
       
       if (debug): sys.stdout.write("  --> Searching for build_uuid in db\n")
       uuid   = resultT['uuid'][:36]
@@ -329,9 +330,7 @@ class XALTdb(object):
         cursor.execute(query, (func_id, link_id, dateStr, func_id, link_id))
         query  = ""
         
-      query = "COMMIT"
-      conn.query(query)
-      query = ""
+      conn.commit()
       
       conn.close()
       if (debug): sys.stdout.write("  --> Done\n\n")
@@ -356,7 +355,7 @@ class XALTdb(object):
     @param index:        The db index for the join table.
     """
 
-    cursor = conn.cursor()
+    cursor = conn.cursor(buffered=True)
     try:
       for entryA in objA:
         object_path  = entryA[0].rstrip(" \r\n")
@@ -383,7 +382,7 @@ class XALTdb(object):
           query      = "INSERT into xalt_object VALUES (NULL,%s,%s,%s,%s,NOW(),%s)"
           cursor.execute(query,(object_path, syshost, hash_id, moduleName, obj_kind))
           query      = ""
-          obj_id   = conn.insert_id()
+          obj_id   = cursor.lastrowid 
           #print("obj_id: ",obj_id, ", obj_kind: ", obj_kind,", path: ", object_path, "moduleName: ", moduleName)
 
         # Now link libraries to xalt_link record:
@@ -427,13 +426,11 @@ class XALTdb(object):
 
       if (debug): sys.stdout.write("  --> Trying to connect to database\n")
       conn     = self.connect()
-      cursor   = conn.cursor()
+      cursor   = conn.cursor(buffered=True)
       query    = "USE "+self.db()
-      conn.query(query)
+      cursor.execute(query)
       if (debug): sys.stdout.write("  --> Starting TRANSACTION\n")
-      query    = "START TRANSACTION"
-      conn.query(query)
-      query    = ""
+      conn.start_transaction()
 
       if (not ('userDT' in runT)):
         if (debug): sys.stdout.write("  --> failed to record: No userDT in runT --> FAILURE\n\n")
@@ -596,9 +593,7 @@ class XALTdb(object):
           
       v = XALT_Stack.pop()
       carp("SUBMIT_HOST",v)
-      query = "COMMIT"
-      conn.query(query)
-      query = ""
+      conn.commit()
       conn.close()
       if (debug): sys.stdout.write("  --> Done\n\n")
       
